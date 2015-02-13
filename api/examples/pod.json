@@ -1,11 +1,11 @@
 {
   "kind": "Pod",
   "apiVersion": "v1beta1",
-  "id": "php",
+  "id": "php2",
   "desiredState": {
     "manifest": {
       "version": "v1beta1",
-      "id": "php",
+      "id": "php2",
       "containers": [{
         "name": "nginx",
         "image": "dockerfile/nginx",

@@ -65,6 +65,7 @@ func (c *Client) ListContainers(opts ListContainersOptions) ([]APIContainers, er
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("\n\nRequesting container list via rest docker: %+v with options %+v, found containers %+v\n\n", path, opts, containers)
 	return containers, nil
 }
 

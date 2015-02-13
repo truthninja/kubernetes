@@ -963,7 +963,7 @@ func (kl *Kubelet) killContainersInPod(pod *api.BoundPod, dockerContainers docke
 	wg := sync.WaitGroup{}
 	for _, container := range pod.Spec.Containers {
 		// TODO: Consider being more aggressive: kill all containers with this pod UID, period.
-		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+		if dockerContainer, _, err := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); err == nil {
 			count++
 			wg.Add(1)
 			go func() {
@@ -1010,7 +1010,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 
 	// Make sure we have a pod infra container
 	var podInfraContainerID dockertools.DockerID
-	if podInfraDockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uid, dockertools.PodInfraContainerName); found {
+	if podInfraDockerContainer, _, err := dockerContainers.FindPodContainer(podFullName, uid, dockertools.PodInfraContainerName); err == nil {
 		podInfraContainerID = dockertools.DockerID(podInfraDockerContainer.ID)
 	} else {
 		glog.V(2).Infof("Pod infra container doesn't exist for pod %q, killing and re-creating the pod", podFullName)
@@ -1048,7 +1048,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 	for _, container := range pod.Spec.Containers {
 		expectedHash := dockertools.HashContainer(&container)
 		dockerContainerName := dockertools.BuildDockerName(uid, podFullName, &container)
-		if dockerContainer, found, hash := dockerContainers.FindPodContainer(podFullName, uid, container.Name); found {
+		if dockerContainer, hash, err := dockerContainers.FindPodContainer(podFullName, uid, container.Name); err == nil {
 			containerID := dockertools.DockerID(dockerContainer.ID)
 			glog.V(3).Infof("pod %q container %q exists as %v", podFullName, container.Name, containerID)
 
@@ -1095,8 +1095,8 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 			killedContainers[containerID] = empty{}
 
 			if podChanged {
-				// Also kill associated pod infra container if the pod changed.
-				if podInfraContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uid, dockertools.PodInfraContainerName); found {
+				// Also kill associated pod infra container
+				if podInfraContainer, _, err := dockerContainers.FindPodContainer(podFullName, uid, dockertools.PodInfraContainerName); err == nil {
 					if err := kl.killContainer(podInfraContainer); err != nil {
 						glog.V(1).Infof("Failed to kill pod infra container %q: %v", podInfraContainer.ID, err)
 						continue
@@ -1464,11 +1464,15 @@ func (kl *Kubelet) GetBoundPods() ([]api.BoundPod, error) {
 // GetPodFullName provides the first pod that matches namespace and name, or false
 // if no such pod can be found.
 func (kl *Kubelet) GetPodByName(namespace, name string) (*api.BoundPod, bool) {
+	glog.V(1).Infof("Iterating through kubelet pods for: namespace %+v, name %+v", namespace, name)
 	for i := range kl.pods {
 		pod := &kl.pods[i]
+		glog.V(1).Infof("Name of pod %+v, Namespace %+v", pod, pod.Namespace, pod.Name)
 		if pod.Namespace == namespace && pod.Name == name {
+			glog.V(1).Infof("Found target pod %+v, %+v", pod.Namespace, pod.Name)
 			return pod, true
 		}
+		glog.V(1).Infof("Did not find target pod %+v, %+v", namespace, name)
 	}
 	return nil, false
 }
@@ -1626,8 +1630,8 @@ func (kl *Kubelet) RunInContainer(podFullName string, uid types.UID, container s
 	if err != nil {
 		return nil, err
 	}
-	dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uid, container)
-	if !found {
+	dockerContainer, _, err := dockerContainers.FindPodContainer(podFullName, uid, container)
+	if err != nil {
 		return nil, fmt.Errorf("container not found (%q)", container)
 	}
 	return kl.runner.RunInContainer(dockerContainer.ID, cmd)

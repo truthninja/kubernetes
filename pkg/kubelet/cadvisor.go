@@ -21,6 +21,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubelet/dockertools"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/types"
+	"github.com/golang/glog"
 	cadvisor "github.com/google/cadvisor/info"
 )
 
@@ -46,7 +47,10 @@ func (kl *Kubelet) statsFromContainerPath(cc cadvisorInterface, containerPath st
 // This method takes a Docker container's ID and returns the stats for the
 // container.
 func (kl *Kubelet) statsFromDockerContainer(cc cadvisorInterface, containerId string, req *cadvisor.ContainerInfoRequest) (*cadvisor.ContainerInfo, error) {
+	glog.V(1).Infof("++++Looking for stats from container with id %+v for request %+v", containerId, req)
 	cinfo, err := cc.DockerContainer(containerId, req)
+	glog.V(1).Infof("++++Stats returned cinfo %+v, with err %+v", cinfo, err)
+
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +59,7 @@ func (kl *Kubelet) statsFromDockerContainer(cc cadvisorInterface, containerId st
 
 // GetContainerInfo returns stats (from Cadvisor) for a container.
 func (kl *Kubelet) GetContainerInfo(podFullName string, uid types.UID, containerName string, req *cadvisor.ContainerInfoRequest) (*cadvisor.ContainerInfo, error) {
+	glog.V(1).Infof("+++Looking for container info of pod name: %+v, uid: %+v, container name: %+v for request %+v", podFullName, uid, containerName, req)
 	cc := kl.GetCadvisorClient()
 	if cc == nil {
 		return nil, nil
@@ -63,10 +68,17 @@ func (kl *Kubelet) GetContainerInfo(podFullName string, uid types.UID, container
 	if err != nil {
 		return nil, err
 	}
-	dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uid, containerName)
-	if !found {
-		return nil, fmt.Errorf("couldn't find container")
+
+	for i, c := range dockerContainers {
+		glog.V(1).Infof("+++Docker container id %+v info Names +%v, Image %+v, Status %+v, Command %+v", i, c.Names, c.Image, c.Status, c.Command)
 	}
+	dockerContainer, _, err := dockerContainers.FindPodContainer(podFullName, uid, containerName)
+	if err != nil {
+		glog.V(1).Infof("+++Didn't find container %+v", podFullName)
+		return nil, err
+	}
+
+	glog.V(1).Infof("Getting stats for container with id %+v for request %+v", dockerContainer.ID, req)
 	return kl.statsFromDockerContainer(cc, dockerContainer.ID, req)
 }
 

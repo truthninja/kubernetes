@@ -32,6 +32,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/latest"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/httplog"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubelet/dockertools"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/types"
 	"github.com/golang/glog"
@@ -285,6 +286,7 @@ func (s *Server) handlePodStatus(w http.ResponseWriter, req *http.Request, versi
 
 // handleStats handles stats requests against the Kubelet.
 func (s *Server) handleStats(w http.ResponseWriter, req *http.Request) {
+	glog.V(1).Infof("Handling Stats for request %+v", req)
 	s.serveStats(w, req)
 }
 
@@ -365,10 +367,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 	// /stats/<podfullname>/<containerName> or /stats/<namespace>/<podfullname>/<uid>/<containerName>
 	components := strings.Split(strings.TrimPrefix(path.Clean(req.URL.Path), "/"), "/")
+	glog.V(1).Infof("Components of stats %+v", components)
 	var stats *info.ContainerInfo
 	var err error
 	var query info.ContainerInfoRequest
+	glog.V(1).Infof("+++++Query before decoding {num} %+v", query)
 	err = json.NewDecoder(req.Body).Decode(&query)
+	glog.V(1).Infof("+++++Query after decoding {num} %+v", query)
+
 	if err != nil && err != io.EOF {
 		s.error(w, err)
 		return
@@ -376,13 +382,16 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 	switch len(components) {
 	case 1:
 		// Machine stats
+		glog.V(1).Infof("Query for machine stats %+v", query)
 		stats, err = s.host.GetRootInfo(&query)
 	case 2:
 		// pod stats
 		// TODO(monnand) Implement this
+		glog.V(1).Infof("Query for pod level status")
 		errors.New("pod level status currently unimplemented")
 	case 3:
 		// Backward compatibility without uid information, does not support namespace
+		glog.V(1).Infof("Query for pod with default namespace %+v and component %+v", api.NamespaceDefault, components[1])
 		pod, ok := s.host.GetPodByName(api.NamespaceDefault, components[1])
 		if !ok {
 			http.Error(w, "Pod does not exist", http.StatusNotFound)
@@ -390,17 +399,26 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 		}
 		stats, err = s.host.GetContainerInfo(GetPodFullName(pod), "", components[2], &query)
 	case 5:
+		glog.V(1).Infof("Query for pod with namespace %+v and component %+v", components[1], components[2])
 		pod, ok := s.host.GetPodByName(components[1], components[2])
+		glog.V(1).Infof("++++Retrieved pod, containers are %+v", pod.Spec.Containers)
 		if !ok {
 			http.Error(w, "Pod does not exist", http.StatusNotFound)
 			return
 		}
 		stats, err = s.host.GetContainerInfo(GetPodFullName(pod), types.UID(components[3]), components[4], &query)
+		if err == dockertools.ErrContainerNotFound {
+			http.Error(w, "Container not found in pod", http.StatusNotFound)
+			return
+		}
 	default:
 		http.Error(w, "unknown resource.", http.StatusNotFound)
 		return
 	}
+	glog.V(1).Infof("GetContainerInfo Returned stats %+v and err %+v", stats, err)
+
 	if err != nil {
+		glog.V(1).Infof("Returning error to handleStats %+v", err)
 		s.error(w, err)
 		return
 	}

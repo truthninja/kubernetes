@@ -85,16 +85,21 @@ func (self *Client) SubcontainersInfo(name string, query *info.ContainerInfoRequ
 func (self *Client) DockerContainer(name string, query *info.ContainerInfoRequest) (cinfo info.ContainerInfo, err error) {
 	u := self.dockerInfoUrl(name)
 	ret := make(map[string]info.ContainerInfo)
+	fmt.Printf("\n\n---Requesting info via url %+v\n\n", u)
 	if err = self.httpGetJsonData(&ret, query, u, fmt.Sprintf("Docker container info for %q", name)); err != nil {
+		fmt.Printf("\n\n---Unable to get json data \n\n")
 		return
 	}
 	if len(ret) != 1 {
+		fmt.Printf("\n\n---Too many containers %+v\n\n", len(ret))
 		err = fmt.Errorf("expected to only receive 1 Docker container: %+v", ret)
 		return
 	}
+	fmt.Printf("\n\n---Creating ci from json data %+v\n\n", ret)
 	for _, cont := range ret {
 		cinfo = cont
 	}
+	fmt.Printf("\n\n Cinfo created %+v\n\n", cinfo)
 	return
 }
 

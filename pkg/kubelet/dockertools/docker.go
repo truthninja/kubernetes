@@ -276,20 +276,27 @@ func (p throttledDockerPuller) IsImagePresent(name string) (bool, error) {
 // DockerContainers is a map of containers
 type DockerContainers map[DockerID]*docker.APIContainers
 
-func (c DockerContainers) FindPodContainer(podFullName string, uid types.UID, containerName string) (*docker.APIContainers, bool, uint64) {
+func (c DockerContainers) FindPodContainer(podFullName string, uid types.UID, containerName string) (*docker.APIContainers, uint64, error) {
+	glog.V(1).Infof("Looking for docker container with manifestid/podfullname %+v, dockeruuid/uid %+v, docker/containername %+v", podFullName, uid, containerName)
 	for _, dockerContainer := range c {
 		if len(dockerContainer.Names) == 0 {
 			continue
 		}
 		// TODO(proppy): build the docker container name and do a map lookup instead?
 		dockerManifestID, dockerUUID, dockerContainerName, hash := ParseDockerName(dockerContainer.Names[0])
+		glog.V(1).Infof("Parsed docker name %+v, uuid %+v, dockerManifestID %+v ", dockerContainerName, dockerUUID, dockerManifestID)
 		if dockerManifestID == podFullName &&
-			(uid == "" || dockerUUID == uid) &&
-			dockerContainerName == containerName {
-			return dockerContainer, true, hash
+			(uid == "" || dockerUUID == uid) {
+			if dockerContainerName == containerName {
+				glog.V(1).Infof("Returning docker container %+v", dockerContainer)
+				return dockerContainer, hash, nil
+			} else {
+				glog.V(1).Infof("Pod without application container %+v", dockerContainer)
+			}
 		}
 	}
-	return nil, false, 0
+	glog.V(1).Infof("No container found matching podfullname %+v, uid %+v, container name %+v: returning nil, false, 0", podFullName, uid, containerName)
+	return nil, 0, ErrContainerNotFound
 }
 
 // Note, this might return containers belong to a different Pod instance with the same name
@@ -312,12 +319,16 @@ func (c DockerContainers) FindContainersByPodFullName(podFullName string) map[st
 // Returns a map of docker containers that we manage. The map key is the docker container ID
 func GetKubeletDockerContainers(client DockerInterface, allContainers bool) (DockerContainers, error) {
 	result := make(DockerContainers)
+	glog.V(1).Infof("Looking for kubelet docker container, map is currently %+v", result)
+	glog.V(1).Infof("Asking for a list of containers via %T with options %+v", client.ListContainers, docker.ListContainersOptions{All: allContainers})
 	containers, err := client.ListContainers(docker.ListContainersOptions{All: allContainers})
+	glog.V(1).Infof("List of current containers %+v", containers)
 	if err != nil {
 		return nil, err
 	}
 	for i := range containers {
 		container := &containers[i]
+		glog.V(1).Infof("Current container has name %+v and entire struct %+v", container.Names, container)
 		if len(container.Names) == 0 {
 			continue
 		}
@@ -326,7 +337,7 @@ func GetKubeletDockerContainers(client DockerInterface, allContainers bool) (Doc
 		// TODO(dchen1107): Remove the old separator "--" by end of Oct
 		if !strings.HasPrefix(container.Names[0], "/"+containerNamePrefix+"_") &&
 			!strings.HasPrefix(container.Names[0], "/"+containerNamePrefix+"--") {
-			glog.V(3).Infof("Docker Container: %s is not managed by kubelet.", container.Names[0])
+			glog.V(1).Infof("Docker Container: %s is not managed by kubelet.", container.Names[0])
 			continue
 		}
 		result[DockerID(container.ID)] = container
@@ -392,6 +403,8 @@ func GetKubeletDockerContainerLogs(client DockerInterface, containerID, tail str
 var (
 	// ErrNoContainersInPod is returned when there are no containers for a given pod
 	ErrNoContainersInPod = errors.New("no containers exist for this pod")
+
+	ErrContainerNotFound = errors.New("Container not found")
 
 	// ErrNoPodInfraContainerInPod is returned when there is no pod infra container for a given pod
 	ErrNoPodInfraContainerInPod = errors.New("No pod infra container exists for this pod")
